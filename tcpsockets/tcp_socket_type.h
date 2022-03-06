@@ -1,7 +1,7 @@
 #ifndef TCPSOCKETTYPE_H_
 #define TCPSOCKETTYPE_H_
 
-#include "../tp4/adresse_internet_type.h"
+#include "../internetaddr/adresse_internet.h"
 #include <stdbool.h>
 
 typedef struct {

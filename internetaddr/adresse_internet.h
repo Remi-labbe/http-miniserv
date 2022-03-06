@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 #include <netinet/ip.h> // Pour in_port_t
-#define _XOPEN_SOURCE 700
+// #define _XOPEN_SOURCE 700
 
 #include "adresse_internet_type.h"
 

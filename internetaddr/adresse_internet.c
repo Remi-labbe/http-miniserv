@@ -20,13 +20,11 @@ adresse_internet *adresse_internet_new(const char *nom, uint16_t port) {
     return NULL;
   }
 
-  struct addrinfo hints = {.ai_family = AF_UNSPEC,
-                           .ai_socktype = SOCK_STREAM,
-                           .ai_flags = AI_PASSIVE};
-  // memset(&hints, 0, sizeof(struct addrinfo));
-  // hints.ai_family = AF_UNSPEC;
-  // hints.ai_socktype = SOCK_STREAM;
-  // hints.ai_flags = AI_PASSIVE;
+  struct addrinfo hints;
+  memset(&hints, 0, sizeof(struct addrinfo));
+  hints.ai_family = AF_UNSPEC;
+  hints.ai_socktype = SOCK_STREAM;
+  hints.ai_flags = AI_PASSIVE;
 
   struct addrinfo *result;
   int r;
@@ -133,8 +131,6 @@ int sockaddr_to_adresse_internet(const struct sockaddr *addr,
   if (adresse == NULL) {
     return -1;
   }
-
-  struct sockaddr_in *addr_in = (struct sockaddr_in *)addr;
 
   char nom[INET6_ADDRSTRLEN > INET_ADDRSTRLEN ? INET6_ADDRSTRLEN
                                               : INET_ADDRSTRLEN] = {0};

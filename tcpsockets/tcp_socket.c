@@ -1,5 +1,4 @@
 #include "tcp_socket.h"
-#include "../tp4/adresse_internet.h"
 #include "tcp_socket_type.h"
 
 #include <arpa/inet.h>
@@ -33,13 +32,13 @@ int connect_socket_tcp(tcp_socket *s, const char *adresse, uint16_t port) {
   }
 
   //   Conflit avec accept > supprime la socket qui a ete recup
-  // int soc = socket(AF_INET, SOCK_STREAM, 0);
-  // if (soc == -1) {
-  //   perror("socket");
-  //   return -1;
-  // }
-  //
-  // s->fd = soc;
+  int soc = socket(AF_INET, SOCK_STREAM, 0);
+  if (soc == -1) {
+    perror("socket");
+    return -1;
+  }
+
+  s->fd = soc;
 
   adresse_internet *addr = adresse_internet_new(adresse, port);
   if (addr == NULL) {
@@ -89,10 +88,15 @@ int ajoute_ecoute_socket_tcp(tcp_socket *s, const char *adresse,
 
   s->local = addr;
 
+	int reuse = 1;
+	if (setsockopt(s->fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(int)) == -1) {
+		perror("setsockopt");
+		return EXIT_FAILURE;
+	}
+
   if (bind(s->fd, (const struct sockaddr *)&s->local->sock_addr,
            sizeof s->local->sock_addr) == -1) {
     perror("bind");
-    adresse_internet_free(addr);
     return -1;
   }
 
@@ -100,7 +104,6 @@ int ajoute_ecoute_socket_tcp(tcp_socket *s, const char *adresse,
 
   if (listen(s->fd, SIZE_QUEUE) == -1) {
     perror("listen");
-    adresse_internet_free(addr);
     return -1;
   }
 
@@ -119,15 +122,15 @@ int accept_socket_tcp(const tcp_socket s, tcp_socket *service) {
     return -1;
   }
 
-  adresse_internet adin;
-  if (sockaddr_to_adresse_internet((const struct sockaddr *)&addr, &adin) ==
+  adresse_internet *adin = malloc(sizeof(adresse_internet));
+  if (sockaddr_to_adresse_internet((const struct sockaddr *)&addr, adin) ==
       -1) {
+    free(adin);
     fprintf(stderr, "accept : sock to ad_in\n");
     return -1;
   }
 
-  connect_socket_tcp(service, adin.nom, adresse_internet_get_port(&adin));
-
+  service->dist = adin;
   service->is_connected = true;
 
   return 0;
