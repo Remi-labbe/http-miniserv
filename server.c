@@ -1,12 +1,13 @@
 #include <errno.h>
+#include <fcntl.h>
+#include <netdb.h>
 #include <pthread.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-#include <netdb.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -17,9 +18,11 @@
 
 #define BUF_SIZE 512
 
-#define STATUS_OK 0
-#define STATUS_FORBIDDEN 1
-#define STATUS_NOT_FOUND 2
+#define STATUS_OK 200
+#define STATUS_NOT_MODIFIED 304
+#define STATUS_BAD_REQUEST 400
+#define STATUS_NOT_FOUND 404
+#define STATUS_NOT_IMPLEMENTED 501
 
 #define SERVER_NAME "http_miniserv"
 #define PORT 8080
@@ -31,16 +34,15 @@ adresse_internet *addr;
 /**
  * @function  start_th
  * @abstract  Start the ith thread in the runner_pool binding it to the client c
- * @param     i      index if the runner to start
  * @param     c      client to bind to the runner
  */
 void start_th(tcp_socket *c);
 /**
- * @function  runner_routine
- * @abstract  Routine ran by a thread when it is listening to a client
- * @param     r       the runner associated to the thread
+ * @function  th_routine
+ * @abstract  Routine ran by a thread when it isanswering a client
+ * @param     c       client connected to the server on this thread
  */
-void *runner_routine(tcp_socket *c);
+void *th_routine(tcp_socket *c);
 
 void cleanup(void) {
   if (local != NULL) {
@@ -78,51 +80,6 @@ void setup_signals(void) {
     perror("sigaction");
     exit(EXIT_FAILURE);
   }
-}
-
-void header(const tcp_socket *soc, int status) {
-  char req[128] = {0};
-  printf("\n---------\n");
-  recv(soc->fd, req, 128, 0);
-  printf("%s", req);
-  printf("\n---------\n");
-  char header[BUF_SIZE] = {0};
-  char now[128] = {0};
-  time_t t = time(NULL);
-  struct tm *tm = localtime(&t);
-  if (tm == NULL) {
-    status = STATUS_NOT_FOUND;
-  }
-  strftime(now, 128, "%a, %d %b %Y %H:%M:%S GMT", tm);
-  if (status == STATUS_OK) {
-    sprintf(header,
-            "HTTP/1.1 200 OK\r\n"
-            "Date: %s\r\n"
-            "Server: " SERVER_NAME "\r\n"
-            "Content-type: text/plain\r\n"
-            "Content-length: %zu\r\n"
-            "\r\n",
-            now, strlen("Bonjour\n"));
-  } else if (status == STATUS_FORBIDDEN) {
-    sprintf(header,
-            "HTTP/1.1 403 Forbidden\r\n"
-            "Date: %s\r\n"
-            "Server: " SERVER_NAME "\r\n"
-            "Content-type: text/plain\r\n"
-            "Connection: close\r\n"
-            "\r\n",
-            now);
-  } else {
-    sprintf(header,
-            "HTTP/1.1 404 Not Found\r\n"
-            "Date: %s\r\n"
-            "Server: " SERVER_NAME "\r\n"
-            "Content-type: text/plain\r\n"
-            "Connection: close\r\n"
-            "\r\n",
-            now);
-  }
-  write_socket_tcp(soc, header, strlen(header));
 }
 
 int main(void) {
@@ -172,22 +129,81 @@ void start_th(tcp_socket *c) {
     fprintf(stderr, "pthread_attr_setdetachstate: %s\n", strerror(r));
     return;
   }
-  if ((r = pthread_create(&th, &attr, (void *(*)(void *))runner_routine, c)) !=
-      0) {
+  if ((r = pthread_create(&th, &attr, (void *(*)(void *))th_routine, c)) != 0) {
     fprintf(stderr, "pthread_create: %s\n", strerror(r));
     return;
   }
 }
 
-void *runner_routine(tcp_socket *client) {
-  char buf[512] = {0};
-  sprintf(buf, "Bonjour\n");
-  header(client, STATUS_OK);
-  if (write_socket_tcp(client, buf, strlen(buf)) == -1) {
-    fprintf(stderr, "error sending message\n");
+void *th_routine(tcp_socket *client) {
+  char req[128] = {0};
+  printf("\n---------\n");
+  recv(client->fd, req, 128, 0);
+  printf("%s", req);
+  printf("\n---------\n");
+  int status = STATUS_OK;
+  char buf[BUF_SIZE] = {0};
+  char now[128] = {0};
+  time_t t = time(NULL);
+  struct tm *tm = localtime(&t);
+  if (tm == NULL) {
     close_socket_tcp(client);
-    cleanup();
     return NULL;
+  }
+  strftime(now, 128, "%a, %d %b %Y %H:%M:%S GMT", tm);
+  if (status == STATUS_OK) {
+    sprintf(buf,
+            "HTTP/1.1 200 OK\r\n"
+            "Date: %s\r\n"
+            "Server: " SERVER_NAME "\r\n"
+            "Content-type: text/html\r\n"
+            // "Content-length: %zu\r\n"
+            // "\r\n",
+            ,
+            now);
+  }
+  if (write_socket_tcp(client, buf, strlen(buf)) == -1) {
+    fprintf(stderr, "Couldn't send response\n");
+    close_socket_tcp(client);
+    return NULL;
+  }
+  int file = open("index.html", O_RDONLY, S_IRUSR);
+  if (file == -1) {
+    fprintf(stderr, "Couldn't open file\n");
+    close_socket_tcp(client);
+    return NULL;
+  }
+  struct stat s;
+  if (fstat(client->fd, &s) == -1) {
+    fprintf(stderr, "Error on file\n");
+    close_socket_tcp(client);
+    return NULL;
+  }
+  ssize_t blk_client = s.st_blksize;
+  if (fstat(file, &s) == -1) {
+    fprintf(stderr, "Error on file\n");
+    close_socket_tcp(client);
+    return NULL;
+  }
+  memset(buf, 0, BUF_SIZE);
+  sprintf(buf,
+          "Content-length: %zu\r\n"
+          "\r\n",
+          s.st_size);
+  if (write_socket_tcp(client, buf, strlen(buf)) == -1) {
+    fprintf(stderr, "Couldn't send response\n");
+    close_socket_tcp(client);
+    return NULL;
+  }
+  ssize_t size = s.st_blksize > blk_client ? blk_client : s.st_blksize;
+  char msg[size];
+  memset(msg, 0, (size_t)size);
+  while (read(file, msg, (size_t)size) > 0) {
+    if (write_socket_tcp(client, msg, strlen(msg)) == -1) {
+      fprintf(stderr, "Couldn't send response\n");
+      close_socket_tcp(client);
+      return NULL;
+    }
   }
   close_socket_tcp(client);
   return NULL;
