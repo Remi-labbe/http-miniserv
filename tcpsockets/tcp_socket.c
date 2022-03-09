@@ -31,7 +31,6 @@ int connect_socket_tcp(tcp_socket *s, const char *adresse, uint16_t port) {
     return -1;
   }
 
-  //   Conflit avec accept > supprime la socket qui a ete recup
   int soc = socket(AF_INET, SOCK_STREAM, 0);
   if (soc == -1) {
     perror("socket");
@@ -121,6 +120,12 @@ int accept_socket_tcp(const tcp_socket s, tcp_socket *service) {
     perror("accept");
     return -1;
   }
+
+	int keepalive = 1;
+	if (setsockopt(service->fd, SOL_SOCKET, SO_KEEPALIVE, &keepalive, sizeof(int)) == -1) {
+		perror("setsockopt");
+		return EXIT_FAILURE;
+	}
 
   adresse_internet *adin = malloc(sizeof(adresse_internet));
   if (sockaddr_to_adresse_internet((const struct sockaddr *)&addr, adin) ==
