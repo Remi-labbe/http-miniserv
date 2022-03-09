@@ -2,6 +2,7 @@
 #include <fcntl.h>
 #include <netdb.h>
 #include <pthread.h>
+#include <regex.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -10,7 +11,6 @@
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
-// #include <regex.h>
 
 #include "internetaddr/adresse_internet.h"
 #include "internetaddr/adresse_internet_type.h"
@@ -29,26 +29,20 @@
 
 #define TYPE_GET "GET"
 
+#define REQ_REGEX                                                              \
+  "[" TYPE_GET "|POST|HEAD]\\s+(([a-zA-Z0-9_/"                                 \
+  "-\\])+.[a-zA-Z0-9]{3,4})\\s+HTTP[:digit].[:digit]\\s*$"
+
 #define SERVER_NAME "http_miniserv"
 #define PORT 8080
 
 tcp_socket *local;
 adresse_internet *addr;
 
-int header(tcp_socket *client, int scode, off_t fsize);
+int header(tcp_socket *client, int scode, const char *ext, off_t fsize);
 
-// Threads related
-/**
- * @function  start_th
- * @abstract  Start the ith thread in the runner_pool binding it to the client c
- * @param     c      client to bind to the runner
- */
 void start_th(tcp_socket *c);
-/**
- * @function  th_routine
- * @abstract  Routine ran by a thread when it isanswering a client
- * @param     c       client connected to the server on this thread
- */
+
 void *th_routine(tcp_socket *c);
 
 void cleanup(void) {
@@ -143,21 +137,57 @@ void start_th(tcp_socket *c) {
     close_socket_tcp(c);
     return;
   }
+  if ((r = pthread_attr_destroy(&attr)) != 0) {
+    fprintf(stderr, "pthread_attr_destroy: %s\n", strerror(r));
+    exit(EXIT_FAILURE);
+  }
+}
+
+#define REG_ERROR -1
+#define REG_MATCH 0
+#define REG_NO_MATCH 1
+
+int redFormat(char *s) {
+  regex_t reg;
+  if (regcomp(&reg, REQ_REGEX, REG_EXTENDED)) {
+    return REG_ERROR;
+  }
+  if (regexec(&reg, s, 0, NULL, 0)) {
+    return REG_MATCH;
+  }
+  return REG_NO_MATCH;
+}
+
+const char *get_filename_ext(const char *filename) {
+  const char *dot = strrchr(filename, '.');
+  if (!dot || dot == filename)
+    return "";
+  return dot + 1;
 }
 
 void *th_routine(tcp_socket *client) {
   char req[BUF_SIZE] = {0};
   printf("\n---------\n");
-  recv(client->fd, req, BUF_SIZE, 0);
+  read_socket_tcp(client, req, BUF_SIZE);
   printf("%s", req);
-  printf("---------\n");
-  //
-  // TODO: Check request format
-  //
+  printf("\n---------\n");
+  switch (redFormat(req)) {
+  case REG_ERROR:
+    header(client, STATUS_INTERNAL_SERVER_ERROR, "", 0);
+    close_socket_tcp(client);
+    return NULL;
+    break;
+  case REG_NO_MATCH:
+    header(client, STATUS_BAD_REQUEST, "", 0);
+    close_socket_tcp(client);
+    return NULL;
+    break;
+  default:;
+  }
   char *method, *path, *saveptr;
   method = strtok_r(req, " ", &saveptr);
   if (strcmp(method, TYPE_GET) != 0) {
-    header(client, STATUS_NOT_IMPLEMENTED, 0);
+    header(client, STATUS_NOT_IMPLEMENTED, "", 0);
     close_socket_tcp(client);
     return NULL;
   }
@@ -165,98 +195,107 @@ void *th_routine(tcp_socket *client) {
   if (path[0] == '/') {
     ++path;
   }
+  const char *fpath = path;
+  printf("PATH = [%s]\n", fpath);
   if (access(path, F_OK) != 0) {
-    header(client, STATUS_NOT_FOUND, 0);
+    header(client, STATUS_NOT_FOUND, "", 0);
     close_socket_tcp(client);
     return NULL;
   } else if (access(path, R_OK) != 0) {
-    header(client, STATUS_FORBIDDEN, 0);
+    header(client, STATUS_FORBIDDEN, "", 0);
     close_socket_tcp(client);
     return NULL;
   }
-  //
   int file = open(path, O_RDONLY, S_IRUSR);
   if (file == -1) {
-    header(client, STATUS_INTERNAL_SERVER_ERROR, 0);
+    header(client, STATUS_INTERNAL_SERVER_ERROR, "", 0);
     close_socket_tcp(client);
     return NULL;
   }
   struct stat s;
   if (fstat(file, &s) == -1) {
-    header(client, STATUS_INTERNAL_SERVER_ERROR, 0);
+    header(client, STATUS_INTERNAL_SERVER_ERROR, "", 0);
     close_socket_tcp(client);
     return NULL;
   }
   if ((s.st_mode & S_IFMT) != S_IFREG) {
-    header(client, STATUS_BAD_REQUEST, 0);
+    header(client, STATUS_FORBIDDEN, "", 0);
     close_socket_tcp(client);
     return NULL;
   }
   off_t fsize = s.st_size;
   ssize_t fblk = s.st_blksize;
   if (fstat(client->fd, &s) == -1) {
-    header(client, STATUS_INTERNAL_SERVER_ERROR, 0);
+    header(client, STATUS_INTERNAL_SERVER_ERROR, "", 0);
     close_socket_tcp(client);
     return NULL;
   }
-  header(client, STATUS_OK, fsize);
+  header(client, STATUS_OK, get_filename_ext(fpath), fsize);
   ssize_t size = s.st_blksize > fblk ? fblk : s.st_blksize;
-  // printf("fsize: %zu\nfblk: %zu\nsize: %zu\n", fsize, fblk, size);
   char msg[size];
-  memset(msg, 0, (size_t)size);
-  while (read(file, msg, (size_t)size) > 0) {
-    if (write_socket_tcp(client, msg, strlen(msg)) == -1) {
+  ssize_t n;
+  while ((n = read(file, msg, (size_t)size)) != 0) {
+    if (write_socket_tcp(client, msg, (size_t)n) == -1) {
+      perror("write");
       break;
     }
-    printf(">WRITE\n");
-    memset(msg, 0, (size_t)size);
+  }
+  if (n == -1) {
+    perror("read");
   }
   printf(">END\n");
   close_socket_tcp(client);
   return NULL;
 }
 
-// int redFormat(char *s) {
-//   regex_t reg;
-//   regcomp(&reg, "", REG_EXTENDED);
-//   return 0;
-// }
-
-int status(int code, char *buf) {
+void status(const int code, char *buf) {
   switch (code) {
   case STATUS_OK:
     strcpy(buf, "Ok");
-    return 0;
+    break;
   // case STATUS_NOT_MODIFIED:
   //   strcpy(buf, "Not Modified");
-  //   return 0;
+  //   break;
   case STATUS_BAD_REQUEST:
     strcpy(buf, "Bad Request");
-    return 0;
+    break;
   case STATUS_FORBIDDEN:
     strcpy(buf, "Forbidden");
-    return 0;
+    break;
   case STATUS_NOT_FOUND:
     strcpy(buf, "Not Found");
-    return 0;
+    break;
   case STATUS_INTERNAL_SERVER_ERROR:
     strcpy(buf, "Internal Server Error");
-    return 0;
+    break;
   case STATUS_NOT_IMPLEMENTED:
     strcpy(buf, "Not Implemented");
-    return 0;
+    break;
   default:
     strcpy(buf, "Internal Server Error");
-    return -1;
   }
 }
 
-int header(tcp_socket *client, int scode, off_t fsize) {
-  char buf[BUF_SIZE] = {0};
-  char status_str[128] = {0};
-  if (status(scode, status_str) == -1) {
-    return -1;
+void content_type(const char *ext, char *buf) {
+  if (strcmp(ext, "html") == 0) {
+    strcpy(buf, "text/html");
+  } else if (strcmp(ext, "png") == 0) {
+    strcpy(buf, "image/png");
+  } else if (strcmp(ext, "mp4") == 0) {
+    strcpy(buf, "video/mp4");
+  } else if (strcmp(ext, "jpg") == 0 || strcmp(ext, "jpeg") == 0) {
+    strcpy(buf, "image/jpeg");
+  } else {
+    strcpy(buf, "text/plain");
   }
+}
+
+int header(tcp_socket *client, int scode, const char *ext, off_t fsize) {
+  char status_str[128] = {0};
+  char cont_type[128] = {0};
+  char buf[BUF_SIZE] = {0};
+  status(scode, status_str);
+  content_type(ext, cont_type);
   char now[128] = {0};
   time_t t = time(NULL);
   struct tm *tm = localtime(&t);
@@ -268,12 +307,13 @@ int header(tcp_socket *client, int scode, off_t fsize) {
   case STATUS_OK:
     sprintf(buf,
             "HTTP/1.0 %d %s\r\n"
+            "Content-Type: %s\r\n"
+            "Content-Length: %zu\r\n"
+            "Connection: keep-alive\r\n"
             "Date: %s\r\n"
             "Server: " SERVER_NAME "\r\n"
-            "Content-type: text/html\r\n"
-            "Content-length: %zu\r\n"
             "\r\n",
-            scode, status_str, now, fsize);
+            scode, status_str, cont_type, fsize, now);
     break;
   // case STATUS_NOT_MODIFIED:
   //   sprintf(buf,
