@@ -10,7 +10,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/socket.h>
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
@@ -19,29 +18,16 @@
 #include "internetaddr/adresse_internet_type.h"
 #include "tcpsockets/tcp_socket.h"
 #include "tcpsockets/tcp_socket_type.h"
+#include "header/header.h"
+#include "format/format.h"
+#include "config.h"
 
 #define BUF_SIZE 1024
 
-#define STATUS_OK 200
-#define STATUS_NOT_MODIFIED 304
-#define STATUS_BAD_REQUEST 400
-#define STATUS_FORBIDDEN 403
-#define STATUS_NOT_FOUND 404
-#define STATUS_INTERNAL_SERVER_ERROR 500
-#define STATUS_NOT_IMPLEMENTED 501
-
 #define TYPE_GET "GET"
-
-#define REQ_REGEX                                                              \
-  "^(GET|POST|HEAD) /(.*\\.([a-zA-Z0-9]{1,4}))? HTTP/[0-9]\\.[0-9]$"
-
-#define SERVER_NAME "http_miniserv"
-#define PORT 8080
 
 tcp_socket *local;
 adresse_internet *addr;
-
-int header(tcp_socket *client, int scode, const char *ext, off_t fsize);
 
 void start_th(tcp_socket *c);
 
@@ -142,35 +128,6 @@ void start_th(tcp_socket *c) {
     exit(EXIT_FAILURE);
   }
 }
-
-#define REG_ERROR -1
-#define REG_MATCH 0
-#define REG_NO_MATCH 1
-
-int redFormat(char *s, const char *pattern, regmatch_t matches[],
-              size_t nmatches) {
-  regex_t reg;
-  if (regcomp(&reg, pattern, REG_EXTENDED)) {
-    return REG_ERROR;
-  }
-  int res = regexec(&reg, s, nmatches, matches, 0);
-  regfree(&reg);
-  if (res == 0) {
-    return REG_MATCH;
-  } else if (res == REG_NOMATCH) {
-    return REG_NO_MATCH;
-  }
-  return REG_ERROR;
-}
-
-void getGrp(const char *str, char *buf, regmatch_t *matches, size_t n) {
-  const char *ptr = str + matches[n].rm_so;
-  int len = matches[n].rm_eo - matches[n].rm_so;
-  strncpy(buf, ptr, (size_t)len);
-  buf[strlen(buf)] = 0;
-}
-
-#define MATCH_NB 3
 
 // do {
 // readline
@@ -283,113 +240,4 @@ void *th_routine(tcp_socket *client) {
   }
   close_socket_tcp(client);
   return NULL;
-}
-
-void status(const int code, char *buf) {
-  switch (code) {
-  case STATUS_OK:
-    strcpy(buf, "Ok");
-    break;
-  case STATUS_NOT_MODIFIED:
-    strcpy(buf, "Not Modified");
-    break;
-  case STATUS_BAD_REQUEST:
-    strcpy(buf, "Bad Request");
-    break;
-  case STATUS_FORBIDDEN:
-    strcpy(buf, "Forbidden");
-    break;
-  case STATUS_NOT_FOUND:
-    strcpy(buf, "Not Found");
-    break;
-  case STATUS_INTERNAL_SERVER_ERROR:
-    strcpy(buf, "Internal Server Error");
-    break;
-  case STATUS_NOT_IMPLEMENTED:
-    strcpy(buf, "Not Implemented");
-    break;
-  default:
-    strcpy(buf, "Internal Server Error");
-  }
-}
-
-void content_type(const char *ext, char *buf) {
-  if (strcmp(ext, "html") == 0) {
-    strcpy(buf, "text/html");
-  } else if (strcmp(ext, "png") == 0) {
-    strcpy(buf, "image/png");
-  } else if (strcmp(ext, "jpg") == 0 || strcmp(ext, "jpeg") == 0) {
-    strcpy(buf, "image/jpeg");
-  } else if (strcmp(ext, "mp4") == 0) {
-    strcpy(buf, "video/mp4");
-  } else if (strcmp(ext, "js") == 0) {
-    strcpy(buf, "text/javascript");
-  } else {
-    strcpy(buf, "text/plain");
-  }
-}
-
-int header(tcp_socket *client, int scode, const char *ext, off_t fsize) {
-  char status_str[128] = {0};
-  char cont_type[128] = {0};
-  char buf[BUF_SIZE] = {0};
-  status(scode, status_str);
-  content_type(ext, cont_type);
-  char now[128] = {0};
-  time_t t = time(NULL);
-  struct tm *tm = localtime(&t);
-  if (tm == NULL) {
-    return -1;
-  }
-  strftime(now, 128, "%a, %d %b %Y %H:%M:%S GMT", tm);
-  switch (scode) {
-  case STATUS_OK:
-    sprintf(buf,
-            "HTTP/1.0 %d %s\r\n"
-            "Content-Type: %s\r\n"
-            "Content-Length: %zu\r\n"
-            "Connection: keep-alive\r\n"
-            "Date: %s\r\n"
-            "Server: " SERVER_NAME "\r\n"
-            "\r\n",
-            scode, status_str, cont_type, fsize, now);
-    break;
-  case STATUS_NOT_MODIFIED:
-    sprintf(buf,
-            "HTTP/1.0 %d %s\r\n"
-            "Date: %s\r\n"
-            "Server: " SERVER_NAME "\r\n"
-            "Content-type: text/html\r\n"
-            "\r\n",
-            scode, status_str, now);
-    break;
-  case STATUS_BAD_REQUEST:
-  case STATUS_FORBIDDEN:
-  case STATUS_NOT_FOUND:
-  case STATUS_INTERNAL_SERVER_ERROR:
-  case STATUS_NOT_IMPLEMENTED:
-    sprintf(buf,
-            "HTTP/1.0 %d %s\r\n"
-            "Date: %s\r\n"
-            "Server: " SERVER_NAME "\r\n"
-            "Content-type: text/html\r\n"
-            "Connection: close\r\n"
-            "\r\n",
-            scode, status_str, now);
-    break;
-  default:
-    sprintf(buf,
-            "HTTP/1.0 %d %s\r\n"
-            "Date: %s\r\n"
-            "Server: " SERVER_NAME "\r\n"
-            "Content-type: text/html\r\n"
-            "Connection: close\r\n"
-            "\r\n",
-            STATUS_INTERNAL_SERVER_ERROR, status_str, now);
-  }
-  if (write_socket_tcp(client, buf, strlen(buf)) == -1) {
-    fprintf(stderr, "Couldn't send response\n");
-    return -1;
-  }
-  return 0;
 }
