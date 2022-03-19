@@ -14,13 +14,13 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "config.h"
+#include "format/format.h"
+#include "header/header.h"
 #include "internetaddr/adresse_internet.h"
 #include "internetaddr/adresse_internet_type.h"
 #include "tcpsockets/tcp_socket.h"
 #include "tcpsockets/tcp_socket_type.h"
-#include "header/header.h"
-#include "format/format.h"
-#include "config.h"
 
 #define BUF_SIZE 1024
 
@@ -141,7 +141,7 @@ void *th_routine(tcp_socket *client) {
   char *fstline, *saveptr;
   fstline = strtok_r(req, "\r\n", &saveptr);
   regmatch_t matches[MATCH_NB + 1];
-  switch (redFormat(fstline, REQ_REGEX, matches, MATCH_NB + 1)) {
+  switch (reg_test(fstline, REQ_REGEX, matches, MATCH_NB + 1)) {
   case REG_ERROR:
     header(client, STATUS_INTERNAL_SERVER_ERROR, "", 0);
     close_socket_tcp(client);
@@ -153,9 +153,9 @@ void *th_routine(tcp_socket *client) {
   default:;
   }
   char method[64] = {0}, path[128] = {0}, ext[8] = {0};
-  getGrp(fstline, method, matches, 1);
-  getGrp(fstline, path, matches, 2);
-  getGrp(fstline, ext, matches, 3);
+  req_get_group(fstline, method, matches, 1);
+  req_get_group(fstline, path, matches, 2);
+  req_get_group(fstline, ext, matches, 3);
   if (strcmp(method, TYPE_GET) != 0) {
     header(client, STATUS_NOT_IMPLEMENTED, "", 0);
     close_socket_tcp(client);

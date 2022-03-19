@@ -2,7 +2,7 @@
 
 #include <string.h>
 
-int redFormat(char *s, const char *pattern, regmatch_t matches[],
+int req_test(char *s, const char *pattern, regmatch_t *matches,
               size_t nmatches) {
   regex_t reg;
   if (regcomp(&reg, pattern, REG_EXTENDED)) {
@@ -18,7 +18,7 @@ int redFormat(char *s, const char *pattern, regmatch_t matches[],
   return REG_ERROR;
 }
 
-void getGrp(const char *str, char *buf, regmatch_t *matches, size_t n) {
+void req_get_group(const char *str, char *buf, regmatch_t *matches, size_t n) {
   const char *ptr = str + matches[n].rm_so;
   int len = matches[n].rm_eo - matches[n].rm_so;
   strncpy(buf, ptr, (size_t)len);
