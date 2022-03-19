@@ -153,9 +153,9 @@ void *th_routine(tcp_socket *client) {
   default:;
   }
   char method[64] = {0}, path[128] = {0}, ext[8] = {0};
-  req_get_group(fstline, method, matches, 1);
-  req_get_group(fstline, path, matches, 2);
-  req_get_group(fstline, ext, matches, 3);
+  reg_get_group(fstline, method, matches, 1);
+  reg_get_group(fstline, path, matches, 2);
+  reg_get_group(fstline, ext, matches, 3);
   if (strcmp(method, TYPE_GET) != 0) {
     header(client, STATUS_NOT_IMPLEMENTED, "", 0);
     close_socket_tcp(client);

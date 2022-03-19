@@ -40,6 +40,6 @@ extern int reg_test(char *s, const char *pattern, regmatch_t *matches,
  * @param   matches     array storing the groups in the regex
  * @param   n           the number of the group to get
  */
-extern void req_get_group(const char *str, char *buf, regmatch_t *matches, size_t n);
+extern void reg_get_group(const char *str, char *buf, regmatch_t *matches, size_t n);
 
 #endif // !FORMAT_H
