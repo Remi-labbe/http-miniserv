@@ -3,4 +3,5 @@ server
 Manuel_Utilisateur.pdf
 Manuel_Technique.pdf
 content/*
+!content/.gitkeep
 doc/*.pdf
