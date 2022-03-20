@@ -19,7 +19,7 @@
 * @define REQ_REGEX  defines the format of the first line of a request
 */
 #define REQ_REGEX                                                              \
-  "^(GET|POST|HEAD) /(.*\\.([a-zA-Z0-9]{1,4}))? HTTP/[0-9]\\.[0-9]$"
+  "^(GET|POST|HEAD) /(.+\\.([[:alnum:]]{1,4}))? HTTP/[0-9]\\.[0-9]$"
 
 /**
  * @function  reg_test
