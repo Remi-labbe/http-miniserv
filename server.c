@@ -5,7 +5,6 @@
 #include <fcntl.h>
 #include <netdb.h>
 #include <pthread.h>
-#include <regex.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -76,8 +75,13 @@ int main(void) {
   local = init_socket_tcp();
   addr = adresse_internet_any(PORT);
   char ip[_DNS_NAME_MAX_SIZE] = {0};
+  if (chdir("content") == -1) {
+    perror("chdir");
+    cleanup();
+    return -1;
+  }
   if (adresse_internet_get_ip(addr, ip, _DNS_NAME_MAX_SIZE) == -1) {
-    fprintf(stderr, "couldn't add listening socket\n");
+    fprintf(stderr, "Couldn't resolve ip address\n");
     cleanup();
     return -1;
   }
